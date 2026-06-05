@@ -1,59 +1,181 @@
-import { useState, useRef } from 'react'
-import { Volume2, VolumeX } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { SkipForward, Volume2, VolumeX } from 'lucide-react'
+import { BACKGROUND_MUSIC_TRACKS } from '../data/backgroundMusic'
+
+let sharedAudio
+
+function getSharedAudio() {
+  if (!sharedAudio) sharedAudio = new Audio()
+  return sharedAudio
+}
+
+function getRandomTrackIndex(exceptIndex = -1) {
+  if (BACKGROUND_MUSIC_TRACKS.length <= 1) return 0
+
+  let nextIndex = exceptIndex
+  while (nextIndex === exceptIndex) {
+    nextIndex = Math.floor(Math.random() * BACKGROUND_MUSIC_TRACKS.length)
+  }
+
+  return nextIndex
+}
 
 export default function SoundButton() {
-  const [playing, setPlaying] = useState(false)
-  const ctxRef = useRef(null)
-  const gainRef = useRef(null)
-  const timerRef = useRef(null)
+  const [playing, setPlaying] = useState(true)
+  const [muted, setMuted] = useState(false)
+  const [trackIndex, setTrackIndex] = useState(() => getRandomTrackIndex())
+  const [hasError, setHasError] = useState(false)
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
+  const audioRef = useRef(getSharedAudio())
 
-  function note(ctx, gain, freq, start, dur) {
-    const osc = ctx.createOscillator()
-    const g = ctx.createGain()
-    osc.connect(g); g.connect(gain)
-    osc.frequency.value = freq
-    osc.type = 'triangle'
-    g.gain.setValueAtTime(0, start)
-    g.gain.linearRampToValueAtTime(0.35, start + 0.02)
-    g.gain.linearRampToValueAtTime(0, start + dur - 0.05)
-    osc.start(start); osc.stop(start + dur)
-  }
+  const track = BACKGROUND_MUSIC_TRACKS[trackIndex]
 
-  function playLoop(ctx, gain) {
-    const t = ctx.currentTime
-    const melody = [523, 659, 784, 1047, 784, 659, 784, 1047, 523, 659, 784]
-    const times  = [0, .2, .35, .5, .7, .9, 1.1, 1.3, 1.5, 1.7, 1.9]
-    melody.forEach((f, i) => note(ctx, gain, f, t + times[i], 0.25))
-    timerRef.current = setTimeout(() => {
-      if (gainRef.current) playLoop(ctx, gain)
-    }, 2200)
-  }
+  function playWithSound() {
+    const audio = audioRef.current
 
-  function toggle() {
-    if (!playing) {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)()
-      const gain = ctx.createGain(); gain.gain.value = 0.15; gain.connect(ctx.destination)
-      ctxRef.current = ctx; gainRef.current = gain
-      playLoop(ctx, gain)
+    audio.muted = false
+    setMuted(false)
+
+    return audio.play().then(() => {
       setPlaying(true)
-    } else {
-      clearTimeout(timerRef.current)
-      gainRef.current?.gain.setTargetAtTime(0, ctxRef.current.currentTime, 0.1)
-      gainRef.current = null
+      setHasError(false)
+      setAutoplayBlocked(false)
+    })
+  }
+
+  function playMutedAfterAutoplayBlock() {
+    const audio = audioRef.current
+
+    audio.muted = true
+    setMuted(true)
+    setAutoplayBlocked(true)
+
+    audio.play().then(() => {
+      setPlaying(true)
+    }).catch(() => {
       setPlaying(false)
+    })
+  }
+
+  useEffect(() => {
+    const audio = audioRef.current
+
+    audio.volume = 0.28
+    audio.muted = false
+    audio.preload = 'auto'
+    audio.src = track.src
+    setHasError(false)
+    setAutoplayBlocked(false)
+
+    audio.play().then(() => {
+      setPlaying(true)
+      setMuted(false)
+    }).catch(() => {
+      playMutedAfterAutoplayBlock()
+    })
+  }, [track.src])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    audio.muted = muted
+  }, [muted])
+
+  useEffect(() => {
+    const audio = audioRef.current
+
+    function handleEnded() {
+      nextTrack()
     }
+
+    function handleError() {
+      setHasError(true)
+      nextTrack()
+    }
+
+    audio.addEventListener('ended', handleEnded)
+    audio.addEventListener('error', handleError)
+
+    return () => {
+      audio.removeEventListener('ended', handleEnded)
+      audio.removeEventListener('error', handleError)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!autoplayBlocked) return undefined
+
+    function startWithSound() {
+      playWithSound().catch(() => {
+        setPlaying(false)
+        setAutoplayBlocked(true)
+      })
+    }
+
+    window.addEventListener('pointerdown', startWithSound, { once: true })
+    window.addEventListener('keydown', startWithSound, { once: true })
+
+    return () => {
+      window.removeEventListener('pointerdown', startWithSound)
+      window.removeEventListener('keydown', startWithSound)
+    }
+  }, [autoplayBlocked])
+
+  function nextTrack() {
+    setTrackIndex((current) => getRandomTrackIndex(current))
+  }
+
+  function toggleMute() {
+    if (autoplayBlocked || !playing) {
+      playWithSound().catch(() => {
+        setPlaying(false)
+        setAutoplayBlocked(true)
+      })
+      return
+    }
+
+    setMuted((current) => !current)
   }
 
   return (
-    <button onClick={toggle}
-      className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full flex items-center justify-center transition-all"
+    <div
+      className="fixed bottom-5 right-5 z-50 flex max-w-[calc(100vw-2.5rem)] items-center gap-2 rounded-lg px-2.5 py-2 shadow-2xl"
       style={{
-        background: 'rgba(255,215,0,0.15)',
-        border: '1.5px solid rgba(255,215,0,0.4)',
-        backdropFilter: 'blur(8px)',
-      }}
-      title={playing ? 'Tắt nhạc' : 'Bật nhạc'}>
-      {playing ? <Volume2 size={20} className="text-gold" /> : <VolumeX size={20} className="text-muted" />}
-    </button>
+        background: 'rgba(6,18,10,0.88)',
+        border: '1px solid rgba(255,236,0,0.28)',
+        backdropFilter: 'blur(16px)',
+      }}>
+      <button
+        onClick={toggleMute}
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-lg transition-all"
+        style={{
+          background: playing && !muted ? 'rgba(255,236,0,0.18)' : 'rgba(255,255,255,0.06)',
+          color: playing && !muted ? 'var(--c-gold)' : 'var(--c-muted)',
+          border: '1px solid rgba(255,236,0,0.24)',
+        }}
+        title={autoplayBlocked ? 'Bật nhạc' : muted ? 'Bật tiếng' : 'Tắt tiếng'}>
+        {playing && !muted ? <Volume2 size={18} /> : <VolumeX size={18} />}
+      </button>
+
+      <div className="min-w-0 max-w-[180px] sm:max-w-[260px]">
+        <div className="flex min-w-0 items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-wider" style={{ color:'var(--c-muted)' }}>
+          {playing && !muted ? <Volume2 size={13} /> : <VolumeX size={13} />}
+          <span>{hasError ? 'Không phát được bài này' : autoplayBlocked ? 'Chạm để nghe' : muted ? 'Tắt âm' : 'Nhạc nền'}</span>
+        </div>
+        <div className="truncate text-sm font-semibold text-white">{track.title}</div>
+        <div className="truncate text-xs" style={{ color:'var(--c-muted)' }}>{track.artist}</div>
+      </div>
+
+      <button
+        onClick={nextTrack}
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-lg transition-all"
+        style={{
+          background: 'rgba(255,255,255,0.06)',
+          color: 'var(--c-gold)',
+          border: '1px solid rgba(255,236,0,0.18)',
+        }}
+        title="Bai tiep theo">
+        <SkipForward size={18} />
+      </button>
+    </div>
   )
 }
