@@ -1,0 +1,19 @@
+{
+  "updated_at": "2026-06-11T22:05:00.000Z",
+  "matches": [
+    {
+      "id": "M001",
+      "status": "finished",
+      "actual_home": 2,
+      "actual_away": 1,
+      "updated_at": "2026-06-11T21:55:00.000Z"
+    },
+    {
+      "id": "M002",
+      "status": "live",
+      "actual_home": 0,
+      "actual_away": 0,
+      "updated_at": "2026-06-11T22:05:00.000Z"
+    }
+  ]
+}
